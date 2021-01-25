@@ -21,9 +21,9 @@
 #define INPUTSUBTOPIC "tele/%s/RESULT"
 #define INPUTSUBTOPICSCAN "tele/%[^/]/RESULT"
 #define INPUTPATTERN "tele/+/RESULT"
-#define INPUTPUBTOPIC "cmnd/%s/SSENDSERIAL5"
+#define INPUTPUBTOPIC "cmnd/%s/SSERIALSEND5"
 #define INPUTPOWERTOPIC "cmnd/%s/POWER"
-#define INPUTHEXSTR "0210%2x%2x02001900%2x%2x%4x%2x01000001"
+#define INPUTHEXSTR "0210%02x%02x02001900%02x%02x%04x%02x01000001"
 
 #define OUTPUTSUBTOPIC "cmnd/%s/%s"
 #define OUTPUTSUBTOPICSCAN "cmnd/%[^/]/%s"
@@ -76,17 +76,21 @@ int cmdhash(char *cmd)
     return (-1);
 }
 
-char *hexcmd(char **hexstr)
+char *hexcmd(char *hexstr)
 {
     char tempstr[80];
     int i, checksum = 0;
 
-    for (i = 0; i < strlen(*hexstr); i++)
-        checksum = checksum + *hexstr[i];
+    for (i = 0; i < strlen(hexstr); i+=2){
+        char byte[3];
 
-    sprintf(tempstr, "F1F1%s%2x7E", *hexstr, checksum & 0xff);
+        byte[0] = hexstr[i]; byte[1] = hexstr[i+1]; byte[2] = '\0';
+        checksum = checksum + strtoul(byte, NULL, 16);
+    }
 
-    return (strcpy(*hexstr, tempstr));
+    sprintf(tempstr, "F1F1%s%02X7E", hexstr, checksum & 0xff);
+
+    return (strcpy(hexstr, tempstr));
 }
 
 void wait_for_network()
@@ -173,6 +177,10 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
     struct topicmap *topicmap;
     char pubtopic[80];
 
+#ifdef DEBUG
+    fprintf(stderr, "message->payload: %s\n", message->payload);
+#endif
+
     mosquitto_topic_matches_sub(INPUTPATTERN, message->topic, &result);
     if (result) {
         /* Process payload from raw (input) device */
@@ -200,51 +208,34 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
                     sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "POWER");
                     mosquitto_publish(mosq, NULL, pubtopic, strlen(pwrstr), pwrstr, 1, false);
                 }
-                if (topicmap->state.temp != temp) {
-                    char tempstr[4];
+                if (power == ON) {
+                    char buf[4];
 
                     topicmap->state.temp = temp;
-                    sprintf(tempstr, "%d", temp);
+                    sprintf(buf, "%2d", temp);
                     sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "TEMP");
-                    mosquitto_publish(mosq, NULL, pubtopic, strlen(tempstr), tempstr, 1, false);
-                }
+                    mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
 
-                if (power == ON) {
-                    if (topicmap->state.childlock != childlock) {
-                        char lockstr[4];
+                    strcpy(buf, (childlock == ON) ? "ON" : "OFF");
+                    topicmap->state.childlock = childlock;
+                    sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "CHILDLOCK");
+                    mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
 
-                        strcpy(lockstr, (childlock == ON) ? "ON" : "OFF");
-                        topicmap->state.childlock = childlock;
-                        sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "CHILDLOCK");
-                        mosquitto_publish(mosq, NULL, pubtopic, strlen(lockstr), lockstr, 1, false);
-                    }
-                    if (mode != 1 && topicmap->state.mode != mode) {
-                        char modeval[2];
+                    topicmap->state.mode = mode;
+                    sprintf(buf, "%2u", (unsigned int)mode);
+                    sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "MODE");
+                    mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
 
-                        topicmap->state.mode = mode;
-                        sprintf(modeval, "%u", (unsigned int)mode);
-                        sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "MODE");
-                        mosquitto_publish(mosq, NULL, pubtopic, strlen(modeval), modeval, 1, false);
-                    }
-                    if (topicmap->state.setpoint != setpoint) {
-                        char setpointstr[4];
-
-                        topicmap->state.setpoint = setpoint;
-                        sprintf(setpointstr, "%u", setpoint);
-                        sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "SETPOINT");
-                        mosquitto_publish(mosq, NULL, pubtopic, strlen(setpointstr), setpointstr, 1, false);
-                    }
+                    topicmap->state.setpoint = setpoint;
+                    sprintf(buf, "%2u", setpoint);
+                    sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "SETPOINT");
+                    mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
 
                     timer = (timer & 0xFF) - 1;
-
-                    if (topicmap->state.timer != timer) {
-                        char timerstr[4];
-
-                        topicmap->state.timer = timer;
-                        sprintf(timerstr, "%d", timer);
-                        sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "TIMER");
-                        mosquitto_publish(mosq, NULL, pubtopic, strlen(timerstr), timerstr, 1, false);
-                    }
+                    topicmap->state.timer = timer;
+                    sprintf(buf, "%d", timer);
+                    sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "TIMER");
+                    mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
                 }
             }
             else {
@@ -264,45 +255,38 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
                 abort();
             }
             else {
-                char *payload;
+                char payload[80];
 
                 topicmap = find_in_topicmap(userdata, NULL, outputtopic);
 
-#ifdef DEBUG
-                fprintf(stderr, "payload: %s\n", message->payload);
-#endif
-
-                switch (cmdhash(cmnd))
-                {
-                case POWER:
-                    sprintf(pubtopic, INPUTPOWERTOPIC, topicmap->input);
-                    mosquitto_publish(mosq, NULL, pubtopic, strlen(message->payload), message->payload, 1, false);
-                    break;
-                case CHILDLOCK:
-                    sprintf(payload, INPUTHEXSTR, 0, (strcmp(message->payload, "ON") == 0) ? 1 : 2, 0, 0, 0, 0);
-                    sprintf(pubtopic, INPUTPUBTOPIC, topicmap->input);
-                    mosquitto_publish(mosq, NULL, pubtopic, 42, hexcmd(&payload), 1, false);
-                    break;
-                case MODE:
-                    sprintf(payload, INPUTHEXSTR, 0, 0, atoi(message->payload), 0, 0, 0);
-                    sprintf(pubtopic, INPUTPUBTOPIC, topicmap->input);
-                    mosquitto_publish(mosq, NULL, pubtopic, 42, hexcmd(&payload), 1, false);
-                    break;
-                case SETPOINT:
-                    sprintf(payload, INPUTHEXSTR, 0, 0, 0, atoi(message->payload), 0, 0);
-                    sprintf(pubtopic, INPUTPUBTOPIC, topicmap->input);
-                    mosquitto_publish(mosq, NULL, pubtopic, 42, hexcmd(&payload), 1, false);
-                    break;
-                case TIMER:
-                    sprintf(payload, INPUTHEXSTR, 0, 0, 0, 0, atoi(message->payload) + 1, 0);
-                    sprintf(pubtopic, INPUTPUBTOPIC, topicmap->input);
-                    mosquitto_publish(mosq, NULL, pubtopic, 42, hexcmd(&payload), 1, false);
-                    break;
-                case TEMP:
-                    sprintf(payload, INPUTHEXSTR, 0, 0, 0, 0, 0, atoi(message->payload));
-                    sprintf(pubtopic, INPUTPUBTOPIC, topicmap->input);
-                    mosquitto_publish(mosq, NULL, pubtopic, 42, hexcmd(&payload), 1, false);
-                    break;
+                if (((char *)(message->payload) == NULL) || (*(char*)(message->payload) == '\0'))
+                    fprintf(stderr, "Received null payload for topic: %s\n", message->topic);
+                else {
+                    if (cmdhash(cmnd) == POWER){
+                        sprintf(pubtopic, INPUTPOWERTOPIC, topicmap->input);
+                        mosquitto_publish(mosq, NULL, pubtopic, strlen(message->payload), message->payload, 1, false);
+                    }
+                    else if (topicmap->state.power == OFF)
+                        fprintf(stderr, "Can't set heater controls while power state is off\n");
+                    else {
+                        switch (cmdhash(cmnd))
+                        {
+                        case CHILDLOCK:
+                            sprintf(payload, INPUTHEXSTR, 0, (strcmp(message->payload, "ON") == 0) ? 1 : 2, 0, 0, 0, 0);
+                            break;
+                        case MODE:
+                            sprintf(payload, INPUTHEXSTR, 0, 0, strtol(message->payload, NULL, 10), 0, 0, 0);
+                            break;
+                        case SETPOINT:
+                            sprintf(payload, INPUTHEXSTR, 0, 0, 0, strtol(message->payload, NULL, 10), 0, 0);
+                            break;
+                        case TIMER:
+                            sprintf(payload, INPUTHEXSTR, 0, 0, 0, 0, strtol(message->payload, NULL, 10) + 1, 0);
+                            break;
+                        }
+                        sprintf(pubtopic, INPUTPUBTOPIC, topicmap->input);
+                        mosquitto_publish(mosq, NULL, pubtopic, 42, hexcmd(payload), 1, false);
+                    }
                 }
             }
         }
