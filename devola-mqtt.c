@@ -200,40 +200,37 @@ void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mo
 
             if ((numvars = sscanf(message->payload, "{\"SSerialReceived\":\"F2F2"INPUTHEXSTR"%*2x7E\"}", 
                                         &power, &childlock, &mode, &setpoint, &timer, &temp)) == 6) {
-                if (topicmap->state.power != power) {
-                    char pwrstr[4];
+                char buf[4];
 
-                    topicmap->state.power = power;
-                    strcpy(pwrstr, (power == ON) ? "ON" : "OFF");
-                    sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "POWER");
-                    mosquitto_publish(mosq, NULL, pubtopic, strlen(pwrstr), pwrstr, 1, false);
-                }
+                topicmap->state.power = power;
+                strcpy(buf, (power == ON) ? "ON" : "OFF");
+                sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "POWER");
+                mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
+
+                topicmap->state.temp = temp;
+                sprintf(buf, "%d", temp);
+                sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "TEMP");
+                mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
+
                 if (power == ON) {
-                    char buf[4];
-
-                    topicmap->state.temp = temp;
-                    sprintf(buf, "%2d", temp);
-                    sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "TEMP");
-                    mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
-
                     strcpy(buf, (childlock == ON) ? "ON" : "OFF");
                     topicmap->state.childlock = childlock;
                     sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "CHILDLOCK");
                     mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
 
                     topicmap->state.mode = mode;
-                    sprintf(buf, "%2u", (unsigned int)mode);
+                    sprintf(buf, "%u", (unsigned int)mode);
                     sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "MODE");
                     mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
 
                     topicmap->state.setpoint = setpoint;
-                    sprintf(buf, "%2u", setpoint);
+                    sprintf(buf, "%u", setpoint);
                     sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "SETPOINT");
                     mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
 
                     timer = (timer & 0xFF) - 1;
                     topicmap->state.timer = timer;
-                    sprintf(buf, "%d", timer);
+                    sprintf(buf, "%u", timer);
                     sprintf(pubtopic, OUTPUTPUBTOPIC, topicmap->output, "TIMER");
                     mosquitto_publish(mosq, NULL, pubtopic, strlen(buf), buf, 1, false);
                 }
