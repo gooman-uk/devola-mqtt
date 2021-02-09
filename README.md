@@ -5,6 +5,7 @@ Devola are a UK company who make (among other things) Tuya-enabled glass panel h
 - It can be hard to monitor and control from a Home Automation server like Home Assistant or Open Hab as it doesn't talk MQTT to a local server. Some partial solutions exist (like tuya-mqtt) but they're complex to set up and might not be possible forever
 - It's reliant on the Tuya control server in the cloud, and the Tuya or SmartLife App
 - You might not be comfortable with your data being sent to a cloud server
+- Schedules in Tuya require an active Internet connection. If your Internet fails, your device won't turn on (or off). Tasmota Timers function offline.
 - Ambient temperature is only sent by the stock Tuya firmware when the heater is on. It would be nice to send it all the time so you can monitor temperature in a room even when the heater is off
 - The Tuya app often has timeouts in connecting to the local device, meaning that what's shown is not always up to date
 
